@@ -82,7 +82,12 @@ jobs:
           # Add Bun to PATH for this session
           export PATH="\$HOME/.bun/bin:\$PATH"
         fi
-
+        # Install PM2 if not installed
+        if ! command -v pm2 &> /dev/null; then
+          log "Installing PM2..."
+          npm install -g pm2
+        fi
+        
         log "Installing dependencies..."
         ~/.bun/bin/bun install --frozen-lockfile
 
