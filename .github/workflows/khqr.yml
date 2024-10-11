@@ -1,4 +1,4 @@
-name: Deploy NestJS to Ubuntu Server
+name: Deploy KHQR Service
 
 on:
   push:
@@ -49,10 +49,10 @@ jobs:
         DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
-        DEPLOY_PATH: '/path/to/your/app'  # Adjust this to your app path
+        DEPLOY_PATH: 'software/khqr-service'  # Updated path
       run: |
         cat << 'EOF' > deploy.sh
-        cd $DEPLOY_PATH
+        cd ~/$DEPLOY_PATH  # Changed to use home directory as base
         
         # Install Bun if not already installed
         if ! command -v bun &> /dev/null; then
@@ -75,10 +75,7 @@ jobs:
         
         # Restart PM2 only if build is successful
         if [ $? -eq 0 ]; then
-          # If using PM2 with Bun
-          pm2 restart your-app-name --interpreter ~/.bun/bin/bun
-          # Or if using PM2 to run the built JavaScript
-          # pm2 restart your-app-name
+          pm2 restart khqr-service --interpreter ~/.bun/bin/bun  # Updated service name
         else
           echo "Build failed, restoring backup"
           if [ -d "backup" ]; then
