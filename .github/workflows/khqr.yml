@@ -10,34 +10,35 @@ jobs:
     
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4  # Upgraded to v4 for better performance
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v4  # Upgraded to v4
+      uses: actions/checkout@v4
+
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
       with:
-        node-version: '20'
-        cache: 'npm'  # Enables caching of npm dependencies
-    
-    - name: Cache node modules
+        bun-version: latest
+
+    - name: Cache Bun dependencies
       uses: actions/cache@v3
-      id: cache-nodemodules
+      id: cache-bun
       with:
-        path: node_modules
-        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        path: |
+          node_modules
+          ~/.bun/install/cache
+        key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
         restore-keys: |
-          ${{ runner.os }}-node-
-    
+          ${{ runner.os }}-bun-
+
     - name: Install Dependencies
-      if: steps.cache-nodemodules.outputs.cache-hit != 'true'
-      run: npm ci --prefer-offline  # Uses offline cache if possible
-    
+      if: steps.cache-bun.outputs.cache-hit != 'true'
+      run: bun install --frozen-lockfile
+
     - name: Build
-      run: npm run build
+      run: bun run build
       
     - name: Cache build output
       uses: actions/cache@v3
       with:
-        path: dist  # Adjust if your build output directory is different
+        path: dist
         key: ${{ runner.os }}-build-${{ github.sha }}
     
     - name: Install sshpass
@@ -50,30 +51,40 @@ jobs:
         DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
         DEPLOY_PATH: '/path/to/your/app'  # Adjust this to your app path
       run: |
-        # Create a script to handle deployment
         cat << 'EOF' > deploy.sh
         cd $DEPLOY_PATH
         
+        # Install Bun if not already installed
+        if ! command -v bun &> /dev/null; then
+          curl -fsSL https://bun.sh/install | bash
+          source ~/.bashrc
+        fi
+        
         # Backup current version
         if [ -d "backup" ]; then rm -rf backup; fi
-        cp -r dist backup
+        cp -r dist backup 2>/dev/null || true
         
         git pull
         
-        # Use cached node_modules if package-lock.json hasn't changed
-        if [ "$(git diff HEAD^ HEAD -- package-lock.json | wc -l)" -gt 0 ]; then
-          npm ci --prefer-offline
+        # Use cached dependencies if bun.lockb hasn't changed
+        if [ "$(git diff HEAD^ HEAD -- bun.lockb | wc -l)" -gt 0 ]; then
+          bun install --frozen-lockfile
         fi
         
-        npm run build
+        bun run build
         
         # Restart PM2 only if build is successful
         if [ $? -eq 0 ]; then
-          pm2 restart your-app-name  # Replace with your PM2 app name
+          # If using PM2 with Bun
+          pm2 restart your-app-name --interpreter ~/.bun/bin/bun
+          # Or if using PM2 to run the built JavaScript
+          # pm2 restart your-app-name
         else
           echo "Build failed, restoring backup"
-          rm -rf dist
-          mv backup dist
+          if [ -d "backup" ]; then
+            rm -rf dist
+            mv backup dist
+          fi
           exit 1
         fi
         EOF
@@ -83,7 +94,7 @@ jobs:
         sshpass -p $DEPLOY_PASSWORD ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST 'bash /tmp/deploy.sh'
 
     - name: Cleanup remote server
-      if: always()  # Run even if previous step fails
+      if: always()
       env:
         DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
