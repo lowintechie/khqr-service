@@ -17,29 +17,11 @@ jobs:
       with:
         bun-version: latest
 
-    - name: Cache Bun dependencies
-      uses: actions/cache@v3
-      id: cache-bun
-      with:
-        path: |
-          node_modules
-          ~/.bun/install/cache
-        key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
-        restore-keys: |
-          ${{ runner.os }}-bun-
-
     - name: Install Dependencies
-      if: steps.cache-bun.outputs.cache-hit != 'true'
       run: bun install --frozen-lockfile
 
     - name: Build
       run: bun run build
-      
-    - name: Cache build output
-      uses: actions/cache@v3
-      with:
-        path: dist
-        key: ${{ runner.os }}-build-${{ github.sha }}
     
     - name: Install sshpass
       run: sudo apt-get update && sudo apt-get install -y sshpass
@@ -49,29 +31,72 @@ jobs:
         DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
-        DEPLOY_PATH: 'software/khqr-service'  # Updated path
+        DEPLOY_PATH: 'software/khqr-service'
       run: |
         cat << 'EOF' > deploy.sh
-        cd ~/$DEPLOY_PATH  # Changed to use home directory as base
-        
-        # Backup current version
-        if [ -d "backup" ]; then rm -rf backup; fi
-        cp -r dist backup 2>/dev/null || true
-        
-        git pull
-        
-        # Use cached dependencies if bun.lockb hasn't changed
-        if [ "$(git diff HEAD^ HEAD -- bun.lockb | wc -l)" -gt 0 ]; then
-          bun install --frozen-lockfile
+        #!/bin/bash
+        set -e  # Exit on error
+
+        # Function to log messages
+        log() {
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
+        }
+
+        # Navigate to home directory
+        cd ~
+
+        # Ensure the software directory exists
+        mkdir -p software
+
+        # Navigate to the deployment path
+        cd $DEPLOY_PATH || {
+          log "Failed to change to $DEPLOY_PATH. Creating it..."
+          mkdir -p $DEPLOY_PATH
+          cd $DEPLOY_PATH
+        }
+
+        # Check if it's a git repository, if not, initialize it
+        if [ ! -d ".git" ]; then
+          log "Initializing git repository..."
+          git init
+          git remote add origin https://github.com/yourusername/khqr-service.git || true
         fi
-        
+
+        # Install Bun if not already installed
+        if ! command -v bun &> /dev/null; then
+          log "Installing Bun..."
+          curl -fsSL https://bun.sh/install | bash
+          source ~/.bashrc
+          # Add Bun to PATH for this session
+          export PATH="$HOME/.bun/bin:$PATH"
+        fi
+
+        # Backup current version if exists
+        if [ -d "dist" ]; then
+          log "Backing up current version..."
+          rm -rf backup
+          cp -r dist backup
+        fi
+
+        log "Fetching latest changes..."
+        git fetch origin main || log "Failed to fetch, continuing anyway..."
+        git reset --hard origin/main
+
+        log "Installing dependencies..."
+        bun install --frozen-lockfile
+
+        log "Building project..."
         bun run build
-        
-        # Restart PM2 only if build is successful
+
         if [ $? -eq 0 ]; then
-          pm2 restart khqr-service --interpreter ~/.bun/bin/bun  # Updated service name
+          log "Build successful, restarting service..."
+          pm2 restart khqr-service --interpreter ~/.bun/bin/bun || {
+            log "PM2 restart failed, attempting to start..."
+            cd ~/software/khqr-service
+            pm2 start dist/main.js --name khqr-service --interpreter ~/.bun/bin/bun
+          }
         else
-          echo "Build failed, restoring backup"
+          log "Build failed, restoring backup..."
           if [ -d "backup" ]; then
             rm -rf dist
             mv backup dist
