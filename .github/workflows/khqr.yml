@@ -32,7 +32,7 @@ jobs:
         DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
         DEPLOY_PATH: 'software/khqr-service'
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.TOKEN_GITHUB }}
         REPO_URL: ${{ github.server_url }}/${{ github.repository }}
       run: |
         cat << 'EOF' > deploy.sh
