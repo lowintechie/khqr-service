@@ -34,7 +34,6 @@ jobs:
         DEPLOY_PATH: 'software/khqr-service'
         GITHUB_REPO: ${{ github.repository }}
       run: |
-        # Create deployment script with variables directly inserted
         cat << EOF > deploy.sh
         #!/bin/bash
         set -e  # Exit on error
@@ -59,17 +58,21 @@ jobs:
         # Ensure the software directory exists
         mkdir -p software
 
-        # Check if the repository already exists
+        # Backup current version if exists
         if [ -d "\$DEPLOY_PATH" ]; then
-          log "Updating existing repository..."
+          log "Backing up current version..."
           cd "\$DEPLOY_PATH"
-          git fetch origin main
-          git reset --hard origin/main
-        else
-          log "Cloning repository..."
-          git clone "\$REPO_URL" "\$DEPLOY_PATH"
-          cd "\$DEPLOY_PATH"
+          if [ -d "dist" ]; then
+            rm -rf ../khqr-service-backup
+            cp -r . ../khqr-service-backup
+          fi
         fi
+
+        # Remove existing directory and clone fresh
+        log "Removing existing directory and cloning fresh..."
+        rm -rf "\$DEPLOY_PATH"
+        git clone "\$REPO_URL" "\$DEPLOY_PATH"
+        cd "\$DEPLOY_PATH"
 
         # Install Bun if not already installed
         if ! command -v bun &> /dev/null; then
@@ -80,32 +83,41 @@ jobs:
           export PATH="\$HOME/.bun/bin:\$PATH"
         fi
 
-        # Backup current version if exists
-        if [ -d "dist" ]; then
-          log "Backing up current version..."
-          rm -rf backup
-          cp -r dist backup
-        fi
-
         log "Installing dependencies..."
         ~/.bun/bin/bun install --frozen-lockfile
 
         log "Building project..."
-        ~/.bun/bin/bun run build
-
-        if [ \$? -eq 0 ]; then
+        if ~/.bun/bin/bun run build; then
           log "Build successful, restarting service..."
-          pm2 restart khqr-service --interpreter ~/.bun/bin/bun || {
+          if pm2 restart khqr-service --interpreter ~/.bun/bin/bun; then
+            log "Service restarted successfully"
+          else
             log "PM2 restart failed, attempting to start..."
             pm2 start dist/main.js --name khqr-service --interpreter ~/.bun/bin/bun
-          }
+          fi
         else
           log "Build failed, restoring backup..."
-          if [ -d "backup" ]; then
-            rm -rf dist
-            mv backup dist
+          if [ -d "../khqr-service-backup" ]; then
+            log "Restoring from backup..."
+            rm -rf "\$DEPLOY_PATH"
+            mv ../khqr-service-backup "\$DEPLOY_PATH"
+            cd "\$DEPLOY_PATH"
+            if pm2 restart khqr-service --interpreter ~/.bun/bin/bun; then
+              log "Restored previous version and restarted service"
+            else
+              log "Failed to restart service after restore"
+              exit 1
+            fi
+          else
+            log "No backup available"
+            exit 1
           fi
-          exit 1
+        fi
+
+        # Cleanup
+        if [ -d "../khqr-service-backup" ]; then
+          log "Cleaning up backup..."
+          rm -rf ../khqr-service-backup
         fi
         EOF
         
