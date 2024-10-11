@@ -1,0 +1,92 @@
+name: Deploy NestJS to Ubuntu Server
+
+on:
+  push:
+    branches: [ main ]
+  
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4  # Upgraded to v4 for better performance
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4  # Upgraded to v4
+      with:
+        node-version: '20'
+        cache: 'npm'  # Enables caching of npm dependencies
+    
+    - name: Cache node modules
+      uses: actions/cache@v3
+      id: cache-nodemodules
+      with:
+        path: node_modules
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+    
+    - name: Install Dependencies
+      if: steps.cache-nodemodules.outputs.cache-hit != 'true'
+      run: npm ci --prefer-offline  # Uses offline cache if possible
+    
+    - name: Build
+      run: npm run build
+      
+    - name: Cache build output
+      uses: actions/cache@v3
+      with:
+        path: dist  # Adjust if your build output directory is different
+        key: ${{ runner.os }}-build-${{ github.sha }}
+    
+    - name: Install sshpass
+      run: sudo apt-get update && sudo apt-get install -y sshpass
+      
+    - name: Deploy to Ubuntu server
+      env:
+        DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+        DEPLOY_PATH: '/path/to/your/app'  # Adjust this to your app path
+      run: |
+        # Create a script to handle deployment
+        cat << 'EOF' > deploy.sh
+        cd $DEPLOY_PATH
+        
+        # Backup current version
+        if [ -d "backup" ]; then rm -rf backup; fi
+        cp -r dist backup
+        
+        git pull
+        
+        # Use cached node_modules if package-lock.json hasn't changed
+        if [ "$(git diff HEAD^ HEAD -- package-lock.json | wc -l)" -gt 0 ]; then
+          npm ci --prefer-offline
+        fi
+        
+        npm run build
+        
+        # Restart PM2 only if build is successful
+        if [ $? -eq 0 ]; then
+          pm2 restart your-app-name  # Replace with your PM2 app name
+        else
+          echo "Build failed, restoring backup"
+          rm -rf dist
+          mv backup dist
+          exit 1
+        fi
+        EOF
+        
+        # Execute deployment script
+        sshpass -p $DEPLOY_PASSWORD scp -o StrictHostKeyChecking=no deploy.sh $DEPLOY_USER@$DEPLOY_HOST:/tmp/
+        sshpass -p $DEPLOY_PASSWORD ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST 'bash /tmp/deploy.sh'
+
+    - name: Cleanup remote server
+      if: always()  # Run even if previous step fails
+      env:
+        DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+      run: |
+        sshpass -p $DEPLOY_PASSWORD ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST 'rm -f /tmp/deploy.sh'
