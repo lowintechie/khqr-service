@@ -32,22 +32,26 @@ jobs:
         DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
         DEPLOY_PATH: 'software/khqr-service'
-        GITHUB_TOKEN: ${{ secrets.TOKEN_GITHUB }}
-        REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        GITHUB_REPO: ${{ github.repository }}
       run: |
-        cat << 'EOF' > deploy.sh
+        # Create deployment script with variables directly inserted
+        cat << EOF > deploy.sh
         #!/bin/bash
         set -e  # Exit on error
 
         # Function to log messages
         log() {
-          echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] \$1"
         }
 
-        # Set deployment variables
-        DEPLOY_PATH="$DEPLOY_PATH"
-        REPO_URL="$REPO_URL"
-        GITHUB_TOKEN="$GITHUB_TOKEN"
+        # Define variables
+        DEPLOY_PATH="${DEPLOY_PATH}"
+        GITHUB_REPO="${GITHUB_REPO}"
+        REPO_URL="https://github.com/${GITHUB_REPO}.git"
+
+        log "Starting deployment..."
+        log "Deploy path: \$DEPLOY_PATH"
+        log "Repository: \$GITHUB_REPO"
 
         # Navigate to home directory
         cd ~
@@ -56,21 +60,15 @@ jobs:
         mkdir -p software
 
         # Check if the repository already exists
-        if [ -d "$DEPLOY_PATH" ]; then
+        if [ -d "\$DEPLOY_PATH" ]; then
           log "Updating existing repository..."
-          cd $DEPLOY_PATH
-          
-          # Update the remote URL with token
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@${REPO_URL#https://}"
-          
-          # Fetch and reset to the latest main branch
+          cd "\$DEPLOY_PATH"
           git fetch origin main
           git reset --hard origin/main
         else
           log "Cloning repository..."
-          # Clone the repository with token
-          git clone "https://x-access-token:${GITHUB_TOKEN}@${REPO_URL#https://}" $DEPLOY_PATH
-          cd $DEPLOY_PATH
+          git clone "\$REPO_URL" "\$DEPLOY_PATH"
+          cd "\$DEPLOY_PATH"
         fi
 
         # Install Bun if not already installed
@@ -79,7 +77,7 @@ jobs:
           curl -fsSL https://bun.sh/install | bash
           source ~/.bashrc
           # Add Bun to PATH for this session
-          export PATH="$HOME/.bun/bin:$PATH"
+          export PATH="\$HOME/.bun/bin:\$PATH"
         fi
 
         # Backup current version if exists
@@ -90,12 +88,12 @@ jobs:
         fi
 
         log "Installing dependencies..."
-        bun install --frozen-lockfile
+        ~/.bun/bin/bun install --frozen-lockfile
 
         log "Building project..."
-        bun run build
+        ~/.bun/bin/bun run build
 
-        if [ $? -eq 0 ]; then
+        if [ \$? -eq 0 ]; then
           log "Build successful, restarting service..."
           pm2 restart khqr-service --interpreter ~/.bun/bin/bun || {
             log "PM2 restart failed, attempting to start..."
@@ -110,11 +108,6 @@ jobs:
           exit 1
         fi
         EOF
-        
-        # Modify the script to use the actual values
-        sed -i "s|\"\\$DEPLOY_PATH\"|\"$DEPLOY_PATH\"|" deploy.sh
-        sed -i "s|\"\\$REPO_URL\"|\"$REPO_URL\"|" deploy.sh
-        sed -i "s|\"\\$GITHUB_TOKEN\"|\"$GITHUB_TOKEN\"|" deploy.sh
         
         # Execute deployment script
         sshpass -p $DEPLOY_PASSWORD scp -o StrictHostKeyChecking=no deploy.sh $DEPLOY_USER@$DEPLOY_HOST:/tmp/
