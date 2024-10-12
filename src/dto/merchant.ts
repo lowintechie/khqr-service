@@ -9,6 +9,9 @@ export class MerchantDto {
 
   @IsString()
   acquiringBank: string;
+  S
+  @IsString()
+  accountInformation
 
   @IsString({
     message: 'Currency must be either USD or KHR',

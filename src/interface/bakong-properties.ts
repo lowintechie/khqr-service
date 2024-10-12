@@ -43,7 +43,10 @@ export interface BaseOptionalData {
   amount?: number;
   mobileNumber?: string;
   storeLabel?: string;
+  accountInformation?: string;
+  acquiringBank?: string;
   terminalLabel?: string;
+  billNumber?:string;
   purposeOfTransaction?: string;
   languagePreference?: string;
   merchantNameAlternateLanguage?: string;

@@ -1,12 +1,9 @@
 import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
-import { BakongKHQR, IndividualInfo, MerchantInfo } from 'bakong-khqr';
+import { BakongKHQR, IndividualInfo, MerchantInfo, khqrData } from 'bakong-khqr';
 import * as QRCode from 'qrcode';
-import { KhqrType } from 'src/constants/khrq';
 import { IndividualDto } from 'src/dto/individual';
 import { MerchantDto } from 'src/dto/merchant';
 import { BaseOptionalData } from 'src/interface/bakong-properties';
-import { checkTransactionByMd5 } from 'src/utils/khqrRest';
-
 
 interface GenerateResult {
   qr: string;
@@ -28,9 +25,10 @@ export class KhqrService {
     try {
       let result: GenerateResult;
 
-      if (type === KhqrType.Individual) {
+      if (type === 'personal') {
         result = await this.generateKhqrForIndividual(data as IndividualDto);
-      } else if (type === KhqrType.Merchant) {
+        Logger.log("hello " + result.qr);
+      } else if (type === 'merchant') {
         result = await this.generateKhqrForMerchant(data as MerchantDto);
       } else {
         throw new BadRequestException(`Invalid KHQR type: ${type}`);
@@ -52,42 +50,22 @@ export class KhqrService {
     }
   }
 
-//TODO Check Transaction
-  async checkTransaction(md5: string, bakongToken: string): Promise<any> {
-    this.logger.debug(`Checking transaction for MD5: ${md5}`);
-
-    try {
-      if (!md5 || !bakongToken) {
-        throw new BadRequestException('MD5 and Bakong token are required');
-      }
-
-      const response = await checkTransactionByMd5(md5, bakongToken);
-      this.logger.log('Transaction check completed successfully', { md5 });
-      return response;
-    } catch (error) {
-      this.handleError('Failed to check transaction', error);
-    }
-  }
-
   //TODO Generate KHQR for Individual
   private async generateKhqrForIndividual(
     param: IndividualDto,
   ): Promise<GenerateResult> {
     this.logger.debug('Generating Individual KHQR', {
-      accountId: param.bakongAccountID,
+      bakongAccountID: param.bakongAccountID,
     });
 
     try {
       const individualInfo = new IndividualInfo(
         param.bakongAccountID,
         param.accName,
-		param.currency,
-		param.amount,
+        param.address,
         this.createOptionalData(param),
       );
-
       const generated = this.khqr.generateIndividual(individualInfo).data;
-	  Logger.log(generated);
       return this.createGenerateResult(generated);
     } catch (error) {
       this.handleError('Failed to generate Individual KHQR', error);
@@ -129,19 +107,28 @@ export class KhqrService {
   }
 
   private createOptionalData(param: IndividualDto | MerchantDto): BaseOptionalData {
-	const optionalData: BaseOptionalData = {
-	  currency: param.currency,
-	  amount: param.amount,
-	};
+    const optionalData: BaseOptionalData = {
+      currency: param.currency === 'USD' ? khqrData.currency.usd : '',
+      amount: param.amount,
+      mobileNumber: '',
+      storeLabel: '',
+      accountInformation: param.accountInformation,
+      terminalLabel: '',
+      purposeOfTransaction: '',
+      languagePreference: '',
+      merchantNameAlternateLanguage: '',
+      merchantCityAlternateLanguage: '',
+      upiMerchantAccount: '',
+    };
 
-	// Remove undefined properties
-	Object.keys(optionalData).forEach(key => {
-	  if (optionalData[key as keyof BaseOptionalData] === undefined) {
-		delete optionalData[key as keyof BaseOptionalData];
-	  }
-	});
+    // Remove undefined properties
+    Object.keys(optionalData).forEach(key => {
+      if (optionalData[key as keyof BaseOptionalData] === undefined) {
+        delete optionalData[key as keyof BaseOptionalData];
+      }
+    });
 
-	return optionalData;
+    return optionalData;
   }
 
   private createGenerateResult(generated: {
@@ -165,4 +152,5 @@ export class KhqrService {
       `${message}: ${error?.message || 'Unknown error'}`,
     );
   }
+
 }
