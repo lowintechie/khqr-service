@@ -1,0 +1,140 @@
+name: Deploy KHQR Service
+
+on:
+  push:
+    branches: [ main ]
+  
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+      with:
+        bun-version: latest
+
+    - name: Install Dependencies
+      run: bun install --frozen-lockfile
+
+    - name: Build
+      run: bun run build
+    
+    - name: Install sshpass
+      run: sudo apt-get update && sudo apt-get install -y sshpass
+      
+    - name: Deploy to Ubuntu server
+      env:
+        DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+        DEPLOY_PATH: 'software/khqr-service'
+        GITHUB_REPO: ${{ github.repository }}
+      run: |
+        cat << EOF > deploy.sh
+        #!/bin/bash
+        set -e  # Exit on error
+
+        # Function to log messages
+        log() {
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] \$1"
+        }
+
+        # Define variables
+        DEPLOY_PATH="${DEPLOY_PATH}"
+        GITHUB_REPO="${GITHUB_REPO}"
+        REPO_URL="https://github.com/${GITHUB_REPO}.git"
+
+        log "Starting deployment..."
+        log "Deploy path: \$DEPLOY_PATH"
+        log "Repository: \$GITHUB_REPO"
+
+        # Navigate to home directory
+        cd ~
+
+        # Ensure the software directory exists
+        mkdir -p software
+
+        # Backup current version if exists
+        if [ -d "\$DEPLOY_PATH" ]; then
+          log "Backing up current version..."
+          cd "\$DEPLOY_PATH"
+          if [ -d "dist" ]; then
+            rm -rf ../khqr-service-backup
+            cp -r . ../khqr-service-backup
+          fi
+        fi
+
+        # Remove existing directory and clone fresh
+        log "Removing existing directory and cloning fresh..."
+        rm -rf "\$DEPLOY_PATH"
+        git clone "\$REPO_URL" "\$DEPLOY_PATH"
+        cd "\$DEPLOY_PATH"
+
+        # Install Bun if not already installed
+        if ! command -v bun &> /dev/null; then
+          log "Installing Bun..."
+          curl -fsSL https://bun.sh/install | bash
+          source ~/.bashrc
+          # Add Bun to PATH for this session
+          export PATH="\$HOME/.bun/bin:\$PATH"
+        fi
+        # Install PM2 if not installed
+        if ! command -v pm2 &> /dev/null; then
+          log "Installing PM2..."
+          bun install -g pm2
+        fi
+        
+        log "Installing dependencies..."
+        ~/.bun/bin/bun install --frozen-lockfile
+
+        log "Building project..."
+        if ~/.bun/bin/bun run build; then
+          log "Build successful, restarting service..."
+          if pm2 restart khqr-service --interpreter ~/.bun/bin/bun; then
+            log "Service restarted successfully"
+          else
+            log "PM2 restart failed, attempting to start..."
+            pm2 start dist/main.js --name khqr-service --interpreter ~/.bun/bin/bun
+          fi
+        else
+          log "Build failed, restoring backup..."
+          if [ -d "../khqr-service-backup" ]; then
+            log "Restoring from backup..."
+            rm -rf "\$DEPLOY_PATH"
+            mv ../khqr-service-backup "\$DEPLOY_PATH"
+            cd "\$DEPLOY_PATH"
+            if pm2 restart khqr-service --interpreter ~/.bun/bin/bun; then
+              log "Restored previous version and restarted service"
+            else
+              log "Failed to restart service after restore"
+              exit 1
+            fi
+          else
+            log "No backup available"
+            exit 1
+          fi
+        fi
+
+        # Cleanup
+        if [ -d "../khqr-service-backup" ]; then
+          log "Cleaning up backup..."
+          rm -rf ../khqr-service-backup
+        fi
+        EOF
+        
+        # Execute deployment script
+        sshpass -p $DEPLOY_PASSWORD scp -o StrictHostKeyChecking=no deploy.sh $DEPLOY_USER@$DEPLOY_HOST:/tmp/
+        sshpass -p $DEPLOY_PASSWORD ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST 'bash /tmp/deploy.sh'
+
+    - name: Cleanup remote server
+      if: always()
+      env:
+        DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+      run: |
+        sshpass -p $DEPLOY_PASSWORD ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST 'rm -f /tmp/deploy.sh'
