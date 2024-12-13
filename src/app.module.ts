@@ -6,21 +6,28 @@ import { AppService } from './app.service';
 import { TokenModule } from './mod/token.module';
 import { UserToken } from 'src/entity/user-token.entity';
 
-
 @Module({
   imports: [
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: 'aws-0-ap-southeast-1.pooler.supabase.com',       
-      port: 6543,     
-      username: 'postgres.hycxomssfjrnpupkaepm',   
-      password: 'IYPKKww52OOXEihr',   
-      database: 'postgres',   
-      entities: [UserToken],           
-      synchronize: true,               
+      host: 'ep-dark-silence-a5f8t498.us-east-2.aws.neon.tech',
+      port: 5432,
+      username: 'khqr_service_owner',
+      password: 'Ewvroi6UqLX0',
+      database: 'khqr_service',
+      ssl: true, 
+      extra: {
+        ssl: {
+          rejectUnauthorized: true, 
+        },
+      },
+      synchronize: true, 
+      entities: [
+        UserToken,
+      ],
     }),
     KhqrModule,
-    TokenModule
+    TokenModule,
   ],
   controllers: [AppController],
   providers: [AppService],

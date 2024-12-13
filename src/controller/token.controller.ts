@@ -6,7 +6,10 @@ export class TokenController {
   constructor(private readonly tokenService: TokenService) {}
 
   @Post('generate')
-  async generateToken(@Body('userId') userId: number, @Body('expiresIn') expiresInDays: number) {
+  async generateToken(
+    @Body('userId') userId: string,
+    @Body('expiresIn') expiresInDays: number,
+  ) {
     const token = await this.tokenService.generateToken(userId, expiresInDays);
     return { token };
   }

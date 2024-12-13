@@ -15,7 +15,9 @@ export class TokenService {
   ) {}
 
   async validateToken(token: string): Promise<boolean> {
-    this.logger.debug(`Starting token validation for: ${token.substring(0, 10)}...`);
+    this.logger.debug(
+      `Starting token validation for: ${token.substring(0, 10)}...`,
+    );
 
     try {
       // Step 1: JWT Verification
@@ -31,7 +33,9 @@ export class TokenService {
       // Step 2: Database Check
       let userToken;
       try {
-        userToken = await this.userTokenRepository.findOne({ where: { token } });
+        userToken = await this.userTokenRepository.findOne({
+          where: { token },
+        });
         if (!userToken) {
           this.logger.warn('Token not found in database');
           return false;
@@ -57,10 +61,11 @@ export class TokenService {
     }
   }
 
-  async generateToken(userId: number, expiresInDays: number): Promise<string> {
+  async generateToken(userId: string, expiresInDays: number): Promise<string> {
     const payload = { userId };
-    const token = this.jwtService.sign(payload, { expiresIn: `${expiresInDays}d` });
-    
+    const token = this.jwtService.sign(payload, {
+      expiresIn: `${expiresInDays}d`,
+    });
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + expiresInDays);
 
@@ -71,8 +76,9 @@ export class TokenService {
     });
 
     await this.userTokenRepository.save(userToken);
-    this.logger.debug(`Generated token for user ${userId}, expires at ${expiresAt}`);
-    
+    this.logger.debug(
+      `Generated token for user ${userId}, expires at ${expiresAt}`,
+    );
     return token;
   }
 }
